@@ -1,0 +1,355 @@
+---
+title: "624_HW1"
+date: "02/02/22"
+author: "Sean Connin"
+output:
+  html_document: 
+    toc: TRUE
+    toc-title: ""
+    toc_depth: 3
+    toc_float: 
+      collapsed: TRUE
+      smooth_scroll: FALSE
+    number_sections: true
+    df_print: paged
+    code_folding: hide
+    theme: yeti
+    highlight: tango
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning=FALSE, message = FALSE, error=FALSE)
+```
+
+```{r}
+library(fpp3)
+library(magrittr)
+library(tidyverse)
+library(patchwork)
+library(readxl)
+library(flextable)
+library(USgas)
+
+```
+
+# Time Series Graphics: Q1
+
+**Use the help function to explore what the series gafa_stock, PBS, vic_elec and pelt represent.**
+
+-   gafa_stock: Historical stock prices from 2014-2018 for Google, Amazon, Facebook and Apple. All prices are in \$USD.
+
+-   PBS: Monthly Medicare Australia prescription data
+
+-   elec_vic: half-hourly electricity demand for Victoria, Australia
+
+-   pelt: Hudson Bay Company trading records for Snowshoe Hare and Canadian Lynx furs from 1845 to 1935.
+
+**Use autoplot() to plot some of the series in these data sets.**
+
+**What is the time interval of each series?**
+
+-   gafa_stock: *day*
+-   pbs: *month*
+-   vic_elec: *1/2 hour*
+-   pelt: *annual*
+
+```{r}
+
+# explore series
+
+help(gafa_stock)
+
+help(PBS)
+
+help(vic_elec)
+
+help(pelt)
+
+# 1.a. Use autoplot() to plot some of the series in these data sets
+
+#plot interannual closing price
+
+amazon<-gafa_stock%>%    #closing daily stock price:Amazon
+  filter(Symbol=='AMZN')
+
+p1<-autoplot(amazon, Adj_Close, color='darkblue') +
+  labs(title = "Amazon Adjusted Stock Closing Price",
+       subtitle = "2014-2018",
+       y = "Adjusted Closing Price ($)")+
+  theme_classic()
+
+# plot avg daily demand
+
+daily_avg <- aggregate(Demand~Date,vic_elec, mean)%>% # avg daily demand: vic_elec
+  as_tsibble()
+
+p2<-autoplot(daily_avg, Demand, color='darkblue')+
+  labs(title = "Average Daily Electricity Demand in Victoria, Australia",
+       subtitle = " Year = 2012",
+       y = "Demand (MW))")+
+  theme_classic()
+
+(p1/p2)
+```
+
+# Time Series Graphics: Q2
+
+**Use filter() to find what days corresponded to the peak closing price for each of the four stocks in gafa_stock.**
+
+*AMZN: \$2,039.51*
+
+*GOOG: \$1,268.33*
+
+*AAPL: \$232.07*
+
+*FB: \$217.50*
+
+```{r}
+
+# create function and map with purrr to find peak closing dates
+# note we need to convert stibble to tibble
+
+company<-set_names(c(gafa_stock$Symbol%>%unique()))
+
+f = function(x) {
+  gafa_stock%>%
+  as_tibble()%>% 
+  filter(Symbol== x)%>%
+  summarise(maxi=max(Close))%>%
+  reduce(full_join, by = 'Symbol')
+}
+
+(max_close<-map_df(company, ~f(.x))%>%pivot_longer(cols = 1:4,names_to = "Company", values_to = "Peak_Close")%>%arrange(desc(Peak_Close))%>%flextable())
+
+
+# The following is a more streamlined means of finding peak closing prices
+
+#gafa_stock%>%
+  #as.tibble()%>%
+  #select(Symbol, Close)%>%
+  #group_by(Symbol)%>%
+  #summarise(maxi=max(Close))%>%
+  #arrange(desc(maxi))%>%
+  #flextable()
+  
+
+
+```
+
+# Time Series Graphics: Q3
+
+**Download the file tute1.csv from the book website, open it in Excel (or some other spreadsheet application), and review its contents.**
+
+-   Read the data into R
+-   Convert the data to time series
+-   Construct time series plots of each of the three series
+-   Check what happens when you don't include facet_grid().
+
+*Without facet_grid the three series are plotted on the same graph with a continuous scale for the y-axis. This compresses the plotted data (i.e., reduced amplitude) and, in turn, reduces an investigators ability to distinguish fine-grained patterns within and across series.*
+
+```{r}
+
+# read data tute1 into R
+
+tute1 <- read_csv("tute1.csv")
+
+# convert tute1 into a time series
+
+series <- tute1 %>%
+  mutate(Quarter = yearmonth(Quarter)) %>% #tsibble represent year-month
+  as_tsibble(index = Quarter) # date-times should be declared as index
+
+# Construct time series plots of each of the three series
+
+series %>%
+  pivot_longer(-Quarter) %>%
+  ggplot(aes(x = Quarter, y = value, colour = name)) +
+  geom_line() +
+  facet_grid(name ~ ., scales = "free_y")
+
+
+
+```
+
+# Time Series Graphics: Q4
+
+**The USgas package contains data on the demand for natural gas in the US.**
+
+-   Install the USgas package.
+-   Create a tsibble from us_total with year as the index and state as the key.
+-   Plot the annual natural gas consumption by state for the New England area (comprising the states of Maine, Vermont, New Hampshire, Massachusetts, Connecticut and Rhode Island).
+
+*Note: USgas consists of three data sets:us_monthly, us_total, us_residential.*
+
+```{r}
+
+# create tsibble from us_total with year as the index and state as the key
+
+total <- USgas::us_total%>%
+  as_tsibble(key=state, index = year)
+
+#Plot the annual natural gas consumption by state for the New England area (comprising the states of Maine, Vermont, New Hampshire, Massachusetts, Connecticut and Rhode Island).
+
+total%>%
+  filter(state %in% c('Maine', 'Vermont', 'New Hampshire', 'Massachusetts', 'Connecticut', 'Rhode Island'))%>%
+  mutate_at(vars(y),funs(y=y/1000))%>% # data = units of million cubic feet: divide by 1000 for rendering
+  autoplot()+
+  labs(title= 'Annual Natural Gas Consumption in New England', y = 'Million cubic feet/1000', x= 'Year')+
+  theme_classic()+
+  facet_grid(state ~ ., scales = "free_y")
+
+```
+
+# Time Series Graphics: Q5
+
+**Download tourism.xlsx from the book website and read it into R using readxl::read_excel().**
+
+-   Create a tsibble which is identical to the tourism tsibble from the tsibble package.
+-   Find what combination of Region and Purpose had the maximum number of overnight trips on average.
+-   Create a new tsibble which combines the Purposes and Regions, and just has total trips by State.
+
+*The combination of Region State with the maximum average number of overnight trips was Melbourne Visiting = 985.*
+
+*Other combinations are included in Table 5.1 below.*
+
+```{r}
+
+# make tsibble identical to tsibble::tourism
+# we need to change Quarter col to Date when importing Excel
+
+tourism<-read_excel('tourism.xlsx')
+tourism$Quarter<-as.Date(tourism$Quarter)
+
+tourism%>%
+  as_tsibble(key=c(Region, State,  Purpose), index = Quarter)%>%
+  mutate(Quarter = yearquarter(Quarter)) 
+
+# Combination of Region and Purpose with maximum number of overnight trips on average
+  
+aggregate(Trips ~ Region+Purpose, tourism, max)%>%
+  group_by(Region)%>%
+  arrange(desc(Trips))%>%
+  slice(1)%>%
+  arrange(desc(Trips))%>%
+  flextable()%>%
+  set_caption("Table 5.1: Maximum average number of overnight trips")
+  
+# total trips by state 
+
+trips_state<-aggregate(Trips~Quarter+State, tourism, sum)%>%
+    arrange(State)%>%
+    as_tsibble(key=State, index = Quarter)
+
+#plot total trips for visual assessment
+
+trips_state%>%
+  autoplot(.vars=Trips)+
+  labs(title= 'Total Trips by State: 2000-2015', y = 'Number of Trips', x= 'Year')+
+  theme_classic()+
+  facet_grid(State ~ ., scales = "free_y")
+
+```
+
+# Time Series Graphics: Q8
+
+**Monthly Australian retail data is provided in aus_retail. Select one of the time series as follows (but choose your own seed value):**
+
+set.seed(12345678) myseries \<- aus_retail %>% filter(`Series ID` == sample(aus_retail\$`Series ID`,1))
+
+**Explore your chosen retail time series using the following functions:**
+
+-   autoplot()
+-   gg_season()
+-   gg_subseries()
+-   gg_lag()
+-   ACF()
+
+**Can you spot any seasonality, cyclicity and trend? What do you learn about the series?**
+
+*See response below following the graphs.*
+
+```{r}
+set.seed(124566791)
+
+# load data
+
+series <- tsibbledata::aus_retail %>%
+  filter(`Series ID` == sample(aus_retail$`Series ID`,1)) #1 specifies number of Series ID groups
+
+# autoplot
+
+p1<-series%>%
+  autoplot(Turnover)+
+  labs(title = 'Figure 1. Inter-Annual Turnover in Pharmaceutical, Cosmetic and Toiletry Retail Industry', 
+       subtitle = '1982-2020')+
+  theme(axis.text.x = element_text(angle = 90))+
+  theme_classic()
+
+p2<-series%>%
+  separate(Month, into=c('Year', 'Month'), sep=' ')%>%
+  mutate(Year = as.numeric(Year))%>%
+  filter(Year >= 1982)%>%
+  ggplot(aes(Month, Turnover))+
+  geom_point(aes( color=Year))+
+  theme(axis.text.x = element_text(angle = 90))+
+  labs(title = 'Figure 2. Monthly Turnover in Pharmaceutical, Cosmetic and Toiletry Retail Industry',
+       subtitle = '1982-2020')+
+  theme_classic()
+
+# gg_season
+
+p3<-series%>%
+  gg_season(Turnover)+
+  labs(title = 'Figure 3. Turnover in Pharmaceutical, Cosmetic and Toiletry Retail Industry',
+       subtitle='By Month and Year')+
+  theme_classic()
+
+# gg_subseries
+
+p4<-series%>%
+  gg_subseries(Turnover)+
+  labs(title = 'Figure 4. Turnover in Pharmaceutical, Cosmetic and Toiletry Retail Industry',
+       subtitle='Subplots: Month and Year', x='Year')+
+  theme_classic()+
+  theme(axis.text.x = element_text(angle = 90))
+
+# ACF
+
+p5<-series%>%
+  ACF(Turnover, lag_max=48) %>%
+  autoplot()+
+  labs('Figure 5. Autocorrelation: Turnover in Pharmaceutical, Cosmetic and Toiletry Retail Industry')+
+  theme_classic()
+
+# gg_lag
+
+p6<-series%>%
+  gg_lag(Turnover, geom = 'point', lags = 1:12)+
+  labs(title = 'Figure 6. Lag in Turnover in Pharmaceutical, Cosmetic and Toiletry Retail Industry',
+       x = "lag(Turnover, k)")+
+  theme_classic()
+
+# print plots
+
+p1
+p2
+p3
+p4
+p5
+p6
+
+
+
+ 
+```
+
+**Q8 Summary:**
+
+The following patterns are apparent in this series:
+
+-   *There is a strong increasing, non-stationary, trend (curvilinear) in Turnover between 1990-1920, which may include an ~ decadal pattern (starting in 1990) of increase followed by short decline. Fig. 1 & 4. A similar, less pronounced, cyclic pattern appears at the mid-point of the decadal period (Fig. 4).*
+-   *There is a strong component of seasonality with turnover counts greatest in Dec and lowest in early winter (Jan-Feb). Fig. 2-4.*
+-   *The amplitude of seasonality increases within and across years after ~ 2008. This may be a response to the 2008 recession (Fig. 1 & 4).*
+-   *There is significant autocorrelation at every lag (Fig. 5 & 6) as well as trend and signs of seasonality (scalloping), with peaks 12 months apart (Fig. 6).*
+
+*Retail turnover ($Million AUD) in the Pharmaceutical, Cosmetic, and Toiletry industry has increased since the early 1980's, with greater seasonal and inter-annual variation subsequent to \~2008. There is a strong seasonal component with turnover spiking with the end-of-year holiday season, followed by a lull for several months. The possibility of a decadal cycle in the industry (if confirmed) is interesting and warrants further investigation.*
