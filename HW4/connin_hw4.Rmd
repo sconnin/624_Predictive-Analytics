@@ -1,0 +1,349 @@
+---
+title: "624: Data Processing and Overfitting"
+date: "02/28/22"
+author: "Sean Connin"
+output:
+  html_document: 
+    toc: TRUE
+    toc-title: ""
+    toc_depth: 3
+    toc_float: 
+      collapsed: TRUE
+      smooth_scroll: FALSE
+    number_sections: true
+    df_print: paged
+    code_folding: hide
+    theme: sandstone
+    highlight: tango
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning=FALSE, message = FALSE, error=FALSE)
+```
+
+```{r}
+#library(fpp3)
+#library(seasonal)
+library(magrittr)
+library(tidyverse)
+library(corrplot)
+library(patchwork)
+library(forecast)  # for boxcox
+library(caret) # for spatial sign transformation
+library(mlbench)
+library(dlookr)
+library(naniar) #missingness
+library(flextable)
+
+```
+
+
+# Kuhn and Johnson: Exercise 3.1
+
+From Applied Predictive Modeling. 2016. Kuhn and Johnson. Exercise 3.1
+ The UC Irvine Machine Learning Repository contains a data set related
+to glass identification. The data consist of 214 glass samples labeled as one
+of seven class categories. There are nine predictors, including the refractive
+index and percentages of eight elements: Na, Mg, Al, Si, K, Ca, Ba, and Fe.
+
+
+```{r}
+
+# read in glass data
+
+data(Glass)
+
+# save in working file
+
+glass<-Glass
+
+# review data
+
+glass%>%head(3)%>%
+  flextable()%>%
+  set_caption('Glass Dataset: Subset of Observations')
+
+```
+3.1a. Using visualizations, explore the predictor variables to understand their
+distributions as well as the relationships between predictors.
+
+
+```{r}
+# plot distributions using dlookr
+
+glass%>%plot_normality()	
+```
+
+Pairwise comparisons to evaluate relationships between predictors. 
+
+_The following two figures display pairwise correlations (p < .05) for covariates with and without zero value observations, respectively. A zero/negative value for a chemical concentration generally indicates that the measurement lies below the instrumental detection limit. It is interesting to note that, absent such observations, the pairwise correlations are higher in this dataset across a range of covariates (Figure 11). And in either case, Ba and Ca show a high positive correlation and Ba and Si show a high negative correlation._ 
+
+_An argument can be made for dropping either Ba or Ca for modeling purposes given that they account for similar variance. As Ba also correlates with Si, it may be prudent to retain Ca._ 
+
+```{r}
+
+#create correlation matrix that includes all numerical values 
+
+glass_cor <-glass%>%
+  select(-Type)%>%
+  cor()
+
+#set colors
+  
+col <- colorRampPalette(c("#BB4444", "#EE9988", "#FFFFFF", "#77AADD", "#4477AA"))
+
+# plot pairwise correlations with zero values included
+
+corrplot(glass_cor, method = "shade", 
+         shade.col = NA, 
+         diag=FALSE, 
+         type='upper', 
+         tl.col = "black", 
+         tl.srt = 45, 
+         addCoef.col = "black", 
+         cl.pos = "n", 
+         order = "hclust", 
+         col = col(200), 
+         title ='Glass: Pairwise Correlations of Predictors - Zero Values Included' , 
+         mar=c(0,0,1,0))
+
+
+#plot pairwise correlations removing the zeros
+
+less_cor<-glass%>%
+  select(-Type)%>%
+  filter_if(is.numeric, all_vars((.) != 0))%>%
+  cor()
+
+
+corrplot(less_cor, method = "shade", 
+         shade.col = NA, 
+         diag=FALSE, 
+         type='upper', 
+         tl.col = "black", 
+         tl.srt = 45, 
+         addCoef.col = "black", 
+         cl.pos = "n", 
+         order = "hclust", 
+         col = col(200), 
+         title ='Glass: Pairwise Correlations of Predictors - Zero Values Removed' , 
+         mar=c(0,0,1,0))
+
+```
+
+3.1b. Do there appear to be any outliers in the data? Are any predictors
+skewed?
+
+_Yes, the covariates with skewed distributions include:  "RI" "Mg" "K"  "Ca" "Ba" "Fe". From this list, Ba and Ca also have the highest proportion of outliers (17% and 12%, respectively). The following table and plots provide a summary of these measures._ 
+
+```{r view_outliers, figures-side, fig.show="hold", out.width="50%"}
+
+# Identify predictors that are highly skewed
+
+skew<-glass%>%find_skewness(index=FALSE, thres=TRUE)  
+
+print(paste(cat(skew), "display a skewed distributions."))
+
+# identify outliers -- above q0.75+1.5*IQR and below q0.25+1.5*IQR
+
+diagnose_outlier(glass)%>%arrange(desc(outliers_cnt)) %>% 
+  mutate_if(is.numeric, round , digits=3)%>% 
+  flextable()%>%
+  set_caption("Glass: Outlier Statistics")
+
+# assess change to distributions based on outlier removal
+
+glass %>% 
+    select(find_outliers(glass, index = FALSE)) %>% 
+    plot_outlier()
+```
+3.1c. Are there any relevant transformations of one or more predictors that might improve the classification model?
+
+_Given that few of the covariates have near normal distributions, we can employ a Box_Cox estimation of lambda to select an appropriate transformation method. On this basis, the following covariates are listed with their respective lambda transformation._ 
+
+- _RI - inverse_
+- _Na - inverse or inverse sqrt_
+- _Mg - no transformation_
+- _Al - sqrt or log_
+- _Si - Inverse_
+- _K - log_
+- _Ca - inverse sqrt_
+- _Ba - log_
+- _Fe - log_
+
+_A spatialSign transformation may also be appropriate for covariates that have a significant number of outliers (particularly if they are influential observations). In this Glass dataset, the covariates Ca and Ba are good candidates for the spatialSign transform. The plots below compare untransformed, spatialSign transformed, and lamba transformed distributions for these covariates. The choice of one transformation vs. another may be best evaluated from other model diagnostics and measures of fit._
+
+```{r}
+
+#using boxcox from forecast pkg (we could use MASS as alternative)
+
+g<-glass%>%select(-Type)
+type<-glass%>%select(Type)
+
+g%>%map(BoxCox.lambda)%>%
+  as.data.frame()%>%
+  flextable()%>%
+  set_caption('Box-Cox Lambdas for Glass Predictors')
+
+# Compare transformations on Ca and Ba distributions 
+
+spatial<- preProcess(glass[, -10], method=c('center', 'scale'))
+spatial_2<- predict(spatial, glass[,-10])
+spatial_3<-spatialSign(spatial_2)
+spatial_3<-as.data.frame(spatial_3)
+
+ca1<-glass%>%ggplot(aes(x=Ca))+
+  geom_histogram(fill='steelblue')+
+  theme_classic()+
+  labs(title='Untransformed')
+
+ca2<-spatial_3%>%ggplot(aes(x=Ca))+
+  geom_histogram(fill='steelblue')+
+  theme_classic()+
+  labs(title='Spatial Transform')
+
+ca3<-glass%>%ggplot(aes(x=1/sqrt(Ca)))+
+  geom_histogram(fill='steelblue')+
+  theme_classic()+
+  labs(title='1/sqrt Transform')
+
+ba1<-glass%>%ggplot(aes(x=Ba))+
+  geom_histogram(fill='steelblue')+
+  theme_classic()+
+  labs(title='Untransformed')
+
+ba2<-spatial_3%>%ggplot(aes(x=Ba))+
+  geom_histogram(fill='steelblue')+
+  theme_classic()+
+  labs(title='Spatial Transform')
+
+ba3<-glass%>%ggplot(aes(x=log(Ba)))+
+  geom_histogram(fill='steelblue')+
+  theme_classic()+
+  labs(title='Log Transform')
+
+# plot comparisons
+
+ca1|ca2|ca3
+ba1|ba2|ba3
+
+
+```
+_The following scatter plot matrices are included to show pair-wise comparisons between untransformed and spatialSign transformed covariates. The first matrix displays the untransformed observations._
+
+
+```{r fig.height=10, fig.width=10}
+
+#based on http://rismyhammer.com/ml/OutliersSpatialSign.html#:~:text=Use%20spatialSign%20%28%29%20in%20caret%20to%20conduct%20spatial,myTransformed2%20%3C-%20spatialSign%28myTransformed%29%20myTransformed2%20%3C-%20as.data.frame%28myTransformed2%29%20head%28myTransformed2%2C%2010%29
+
+#Plot spatial sign transformation using caret. Col 10 = 'Type'
+
+trellis.par.set(theme = col.whitebg(), warn = FALSE)
+
+featurePlot(glass[,-10], glass[,10], "pairs",  auto.key = list(columns = 10))
+
+featurePlot(spatialSign(scale(glass[,-10])), glass[,10], "pairs", auto.key = list(columns = 10))
+```
+
+# Kuhn and Johnson: Exercise 3.2
+
+
+3.2. Soybean data can also be found at the UC Irvine Machine Learning Repository. Data were collected to predict disease in 683 soybeans. The 35 predictors are mostly categorical and include information on the environmental conditions (e.g., temperature, precipitation) and plant conditions (e.g., left spots, mold growth). The outcome labels consist of 19 distinct classes.
+
+
+
+```{r}
+
+#load soybeen data
+
+data(Soybean)
+
+soybean<-Soybean
+
+# print selection of dataset
+
+soybean%>%head(3)%>%
+  flextable()%>%
+  set_caption("Soybean Dataset: Subset of Observations")
+
+```
+3.2a. Investigate the frequency distributions for the categorical predictors. 
+
+_The following table and plots provide a summary of the frequency distributions. Collectively, the displays provide a means to screen for low/zero variance covariates (discussed below) as well as class imbalance._
+
+```{r figure.height = 20, figure.width=30}
+
+# calculate frequency distributions of categorical predictor variables
+
+soybean%>%
+  select(!Class)%>%
+  diagnose_category()%>%
+  flextable()%>%
+  set_caption("Soybean: Frequency Statistics for Predictor Variables")
+
+
+# plot frequency distributions for categorical predictors
+
+soybean %>%
+  select(c(,1))%>%
+  plot_bar_category(typographic = FALSE, each=FALSE)
+
+soybean %>%
+  select(c(,2:12))%>%
+  plot_bar_category(typographic = FALSE, each=FALSE)
+
+soybean %>%
+  select(c(,13:24))%>%
+  plot_bar_category(typographic = FALSE, each=FALSE)
+
+soybean %>%
+  select(c(,25:36))%>%
+  plot_bar_category(typographic = FALSE, each=FALSE)
+
+
+
+
+```
+Are any of the distributions degenerate in the ways discussed earlier in this
+chapter?
+
+_A degenerate distribution is comprised of a single random variable with a single value. The Soybean dataset does not include covariates that have strictly degenerate distributions. However, there are several covariates that have near zero variance (nearly degenerate) - i.e. almost all observations belong to one level of the covariate. Included are the covariates 'mycelium' and 'sclerotia'._
+
+```{r}
+soybean%>%
+  diagnose_category()%>%
+  filter(ratio>90)%>%
+  arrange(desc = TRUE)%>%
+    flextable()
+```
+
+3.2b. Roughly 18 % of the data are missing. Are there particular predictors that are more likely to be missing? Is the pattern of missing data related to the classes?
+
+_The propensity for missingess among predictors owes more to aspects of data collection than what we might infer from the available data. Variables that are difficult/costly to collect are more apt to have high proportions of missingness._
+
+_In the soybean dataset, there is a pattern of missingness related to the Class variable. For example, the following class levels have very high levels of missingness: 2-4-d-injury, cyst-nematode, diaporthe-pod-&-stem-blight, herbicide injury, and phytophthora-rot._
+
+```{r figure.height=10, figure.width=40}
+
+# calculate missingness statistics across variables
+
+soybean%>%
+    diagnose()%>%
+    dplyr::select(-unique_count, -unique_rate)%>%
+    filter(missing_count>0)%>%
+    arrange(desc(missing_count))%>%
+    flextable()%>%
+    set_caption("Missing Data Summary: Soybean")
+
+#plot missingness in relation to Class variable -- from Naniar package
+
+gg_miss_fct(soybean, fct = Class)+labs(title='Proportion of Missing Data in Relation to Class Variable')
+
+```
+
+
+3.2c. Develop a strategy for handling missing data, either by eliminating predictors or imputation.
+
+_Given that the proportion of missing data with any of our covariates is relatively low (< ~ 17%), I would be inclined to impute values using  multivariate imputation with chained equations. This method often works well for categorical variables. I would also evaluate other options to reduce missingness prior to impution. These options could include dropping any covariate(s) with a degenerate distribution and/or near zero variance (e.g., mycelium, sclerotia) and/or dropping a covariate(s) that is highly correlated with other predictors. The latter can be evaluated via pairwise correlation and/or variance inflation factors._  
+
+_There are yet other options for identifying/dropping covariates with low predictive value (e.g., PCA, Information Gain). I might defer to one or more these if other options don't yield satisfactory results._
