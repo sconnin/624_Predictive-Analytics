@@ -1,0 +1,521 @@
+---
+title: "624: Forecasting Methods"
+date: "02/22/22"
+author: "Sean Connin"
+output:
+  html_document: 
+    toc: TRUE
+    toc-title: ""
+    toc_depth: 3
+    toc_float: 
+      collapsed: TRUE
+      smooth_scroll: FALSE
+    number_sections: true
+    df_print: paged
+    code_folding: hide
+    theme: sandstone
+    highlight: tango
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning=FALSE, message = FALSE, error=FALSE)
+```
+
+```{r}
+library(fpp3) # datasets
+library(tidyverse)
+library(forecast)
+library(tsibble)
+library(flextable)
+
+```
+
+# Forecasting Toolbox: Exercise 3.1
+
+Produce forecasts for the following series using whichever of NAIVE(y), SNAIVE(y) or RW(y ~ drift()) is more appropriate in each case:
+
+- Australian Population (global_economy): 
+
+- _Figure 1. I selected the drift method for Australian population owing to the monotonic increase and absence of seasonal variation in this series. This approach yielded better results (based on visual inspection) than the MEAN method._
+
+- Bricks (aus_production): 
+
+- _Figure 2. I selected the SNAIVE method to capture seasonal variation associated with this series. A NAIVE model could also be employed. However, it would not embed the variation as part of the forecast._
+
+- NSW Lambs (aus_livestock): 
+
+- _Figure 3. Similar to the previous example, I selected the SNAIVE method for this series._ 
+
+- Household wealth (hh_budget): 
+
+- _Figure 4. I selected the Drift method for this series owing to the absence of distinct seasonality across these series (i.e., Country) as well as the gradual upward trend in the data over the last ~8 years of record._
+
+- Australian takeaway food turnover (aus_retail): 
+
+- _Figure 5. I selected the Drift method in order to capture the overall series trend. An SNAIVE forecast reproduced recent seasonal patterns but did not adequately capture growth in food turnover beginning in 2014._
+
+```{r}
+
+# Subset australian population
+
+aus_pop<-global_economy%>%
+  select(Population, Year)%>%
+  filter(Country %in% 'Australia')
+
+# fit model
+
+aus_popfit<-aus_pop%>%
+  model(RW(Population ~ drift()))
+
+# forecast 5 yrs
+
+aus_popfc<-aus_popfit%>%
+  forecast(h=5)
+
+# plot  pop forecast
+
+aus_popfc%>%
+  autoplot(aus_pop)+ # include confidence intervals
+  labs(title = 'Figure 1. Australian Population', subtitle = 'Drift Method: 5 YR Forecast')+
+  theme_classic()
+
+#===========================================================
+
+# subset Australian production - Bricks (SNAIVE)
+
+aus_prod<- aus_production%>%
+  select(c(Bricks, Quarter))%>%
+  filter_index('1956 Q1' ~ '1999 Q4') # subset to exclude last 5 yrs
+
+# fit model
+
+aus_prodfit<-aus_prod%>%
+  model(SNAIVE(Bricks ~ lag('year'))) # add 1 yr lag
+
+# forecast 5 yrs
+
+aus_prodfc<-aus_prodfit%>%
+  forecast(h=20)  # h = Q, there are 4 per year
+
+# plot pop forecast with data overlap
+
+limited<-aus_production%>%    # last 15 yrs of record for comparative purposes
+  select(c(Bricks, Quarter))%>%
+  filter_index('1990 Q1' ~ '2005 Q2')
+
+aus_prodfc%>%
+  autoplot(limited)+ 
+  labs(title = 'Figure 2. Australian Brick Production', subtitle = 'Seasonal Naive Method: 5 YR Forecast')+
+  theme_classic()
+
+# ============================================================
+
+
+# subset Australian livestock - Lambs, NSW 
+
+aus_live<-aus_livestock%>%
+  filter(Animal %in% 'Lambs', State %in% 'New South Wales')%>%
+  filter_index('1972 Jul' ~ '2014 Dec') # exclude last 3 yrs of data
+
+# fit model (SNAIVE)
+
+aus_livefit<-aus_live%>%
+  model(SNAIVE(Count)) #  1 yr lag default
+
+# forecast 5 yrs
+
+aus_livefc<-aus_livefit%>%
+  forecast(h=60)  # h = mo, there are 12 per year
+
+# create plot with data overlap
+
+limited2<-aus_livestock%>%    # last 8 yrs of record for comparative purposes
+  filter(Animal %in% 'Lambs', State %in% 'New South Wales')%>%
+  filter_index('2010 Jan' ~ '2018 Dec')
+
+aus_livefc%>%
+  autoplot(limited2)+ 
+  labs(title = 'Figure 3. Australian Lamb Production: NSW', subtitle = 'Seasonal Naive Method: 5 YR Forecast')+
+  theme_classic()
+
+
+#=============================================================
+
+# subset Austrailian household wealth 
+
+hh_wealth<-hh_budget#%>%
+  #select(c(Country, Year, Wealth))%>%
+  #filter(Country %in% 'Australia')
+
+# fit model (Drift)
+
+hh_fit<-hh_wealth%>%
+  model(RW (Wealth ~ drift())) 
+
+# forecast 5 yrs
+
+hh_fc<-hh_fit%>%
+  forecast(h=5)  # h = yr
+
+# create plot 
+
+hh_fc%>%
+  autoplot(hh_wealth)+ 
+  labs(title = 'Figure 4. Australian Household Wealth', subtitle = 'Drift Method: 5 YR Forecast')+
+  theme_classic()
+
+#============================================================
+
+# subset Australian Capital Area takeaway food turnover
+
+aus_food<-aus_retail%>%
+  select(c(State, Industry, Month, Turnover))%>%
+  filter(Industry %in% 'Takeaway food services', State %in% 'Australian Capital Territory')
+
+# fit model (SNAIVE)
+
+aus_foodfit<-aus_food%>%
+  model(RW(Turnover ~drift())) #  1 yr lag default
+
+# forecast 2 yrs
+
+aus_foodfc<-aus_foodfit%>%
+  forecast(h=24)  # h = mo, there are 12 per year
+
+# create plot with data overlap
+
+limited3<-aus_retail%>%    # last ~10 yrs of record for comparative purposes
+  select(c(State, Industry, Month, Turnover))%>%
+  filter(Industry %in% 'Takeaway food services', State %in% 'Australian Capital Territory')%>%
+  filter_index('2011 Jan' ~ '2018 Dec')
+
+aus_foodfc%>%
+  autoplot(limited3)+ 
+  labs(title = 'Figure 5. Australian Take Away Food Turnover', subtitle = 'Drift Method: 2 YR Forecast')+
+  theme_classic()
+
+```
+
+# Forecasting Toolbox: Exercise 3.2
+
+Use the Facebook stock price (data set gafa_stock) to do the following:
+
+- Produce a time plot of the series: 
+
+- _See Figure 6._
+
+- Produce forecasts using the drift method and plot them: 
+
+- _See Figure 7._
+
+- Show that the forecasts are identical to extending the line drawn between the first and last observations: 
+- _See Figure 7. The mean 30 day forecast (blue line) extends the line segment connecting the first and last observations in 2018 (red)._
+
+
+- Try using some of the other benchmark functions to forecast the same data set. Which do you think is best? Why? 
+
+- _See Figure 8. Among forecasts produced by the Mean, Naive, and Drift methods, the latter produced the best result. Neither the Mean or Naive forecasts continued the downward trend observed over the last ~ 100 days of record. Nonetheless, if a seasonal increase in the data is expected, the Mean method may be a better option._
+
+
+```{r}
+
+
+#plot time series of adjusted closing stock, adjust for trading days, restrict to 2018
+
+fb<-gafa_stock%>%
+  select(Symbol, Date, Adj_Close)%>%
+  filter(Symbol %in% 'FB')%>%
+  filter(Date > '2018-01-01')%>%
+  mutate(day = row_number()) %>%
+  update_tsibble(index = day, regular = TRUE)
+  
+
+fb%>%
+  autoplot(color = 'steelblue')+
+  labs(title = 'Figure 6. Facebook Adjusted Closing Stock Price', subtitle = '2018')+
+  theme_classic()
+
+# fit model -- Note 1 day intervals 
+
+fb_fit<-fb%>%
+  model(RW(Adj_Close ~ drift())) 
+
+# forecast 1 yrs
+
+fb_fc<-fb_fit%>%
+  forecast(h=30)  # h = day
+
+# create plot 
+
+fb_fc%>%
+  autoplot(fb)+
+  geom_segment(aes(x = 1, y = 181.42, xend = 251, yend = 131.09, colour = "Connect First & Last"), data = fb)+
+  labs(title = 'Figure 7. Facebook Adjusted Closing Stock Price: 2018', subtitle = 'Drift Method: 30 Day Forecast')+
+  theme_classic()
+
+# Model and plot other benchmarks
+
+mult_fit <- fb %>%
+  model(
+    Drift = RW(Adj_Close ~ drift()),
+    Mean = MEAN(Adj_Close),
+    Naive = NAIVE(Adj_Close)
+  )
+
+# Generate forecasts for 60 days
+
+mult_fc <- mult_fit %>% forecast(h = 60)
+
+# Plot forecasts against actual values
+
+mult_fc %>%
+  autoplot(fb, level = NULL) +
+  labs(
+    y = "Adj_Close",
+    title = "Figure 8. Forecast Comparison for Facebook Adjusted Closing Stock Prices", subtitle = '2018'
+  ) +
+  theme_classic()
+
+```
+
+# Forecasting Toolbox: Exercise 3.3
+
+Apply a seasonal naïve method to the quarterly Australian beer production data from 1992. Check if the residuals look like white noise, and plot the forecasts. What do you conclude?
+
+- _The residuals are randomly & normally distributed and there does not appear to be any autocorrelation in the lag (Figure 9). That said, there is an outlier at Lag 4._
+
+- _The seasonal naive forecast effectively captures the variation observed in the series and does not depart from the overall trend (Figure 10). From results presented in Figures 9 & 10, the model provides a reasonable choice for forecasting this series (2-yr. window)._  
+
+```{r}
+
+# Extract data of interest
+
+recent_production <- aus_production %>%
+  filter(year(Quarter) >= 1992)
+
+# Define and estimate a model
+
+fit <- recent_production %>% model(SNAIVE(Beer))
+
+# Look at the residuals  --- check using a box test?
+
+fit %>% gg_tsresiduals()+
+  labs(title='Figure 9. Australian Beer Production Diagnostics')
+  
+
+# Look a some forecasts
+
+fit %>% forecast() %>% 
+  autoplot(recent_production)+
+  labs(title='Figure 10. Australian Beer Production')+
+  theme_classic()
+
+```
+
+# Forecasting Toolbox: Exercise 3.4
+
+Repeat the previous exercise using the Australian Exports series from global_economy and the Bricks series from aus_production. Use whichever of NAIVE() or SNAIVE() is more appropriate in each case.
+
+- _Global Economy: Australian Exports - the residuals for this series are normally distributed and homoscedastic (Figure 11). There is a hint of autocorrelation at  4-Yr lag intervals. This feature, however, is not consistent across the lag series. Similarly, inter-annual seasonality (Figure 12) is irregular. The NAIVE method is appropriate for this series._
+
+- _Australian Production: Bricks (Figure 13 & 14) - _there is periodic autocorrelation within the lag series (Figure 13) and the residuals are skewed (left tail). A plot the innovation residuals points to a 5-yr cycle of increasing-decreasing values (~1990 on). The SNAIVE method is appropriate for this series but does not replicate the more recent 5-yr cycle._ 
+
+```{r}
+
+# Extract data of interest
+
+aus_exp <- global_economy %>%
+  select(c(Country, Year, Exports))%>%
+  filter(Country %in% 'Australia')
+
+# Define model
+
+aus_fit <- aus_exp %>% model(NAIVE(Exports)) # NAIVE - annual data
+
+# Plot residuals
+
+aus_fit %>% gg_tsresiduals()+
+  labs(title='Figure 11. Diagnostics for Australian Exports')
+
+# Forecast
+
+aus_fit %>% forecast(h=10) %>%
+  autoplot(aus_exp)+
+  labs(title='Figure 12. Forecast for Australian Exports', subtitle="Naive  Forecasting Method")+
+  theme_classic()
+```
+
+
+
+```{r}
+# Extract Australian Brick Production 
+
+aus_prod <- aus_production %>%
+  select(Bricks)%>%
+  drop_na(Bricks) # a dim() check indicates gaps (scan_gaps()?)
+
+# Define and estimate a model
+
+ausprod_fit <- aus_prod%>% model(SNAIVE(Bricks))
+
+# Plot residuals
+
+ausprod_fit %>% gg_tsresiduals()+
+  labs(title='Figure 13. Diagnostics for Australian Brick Production')
+
+# Plot forecast 2 yrs 
+
+ausprod_fit%>%
+  forecast(h=16)%>%
+  autoplot(aus_prod)+
+  labs(title='Figure 14. Forecast for Australian Brick Production from 1980', subtitle='SNAIVE Method')+
+  theme_classic()
+
+
+```
+
+# Forecasting Toolbox: Exercise 3.7
+
+For your retail time series (from Exercise 8 in Section 2.10) create a training dataset consisting of observations before 2011.
+
+_Dataset = Turnover in the Pharmaceutical, Cosmetic, and Toiletry Industry. Turnover has been log transformed to reduce changes in seasonal variance over time._
+
+```{r}
+
+# replicate dataset used in HW2
+
+set.seed(124566791)
+
+# load data
+
+myseries <- aus_retail %>%
+  filter(`Series ID` == sample(aus_retail$`Series ID`,1)) 
+
+#log transform Turnover
+
+myseries<-myseries%>%
+  mutate(Turnover = log(Turnover))
+
+myseries_train <- myseries %>%
+  filter(year(Month) < 2011)
+```
+
+Check that your data have been split appropriately by producing the following plot.
+
+```{r}
+autoplot(myseries, Turnover) +
+  autolayer(myseries_train, Turnover, colour = "red")+
+  labs(title='Figure 15. South Australia Industry Turnover', subtitle='pharmaceutical, cosmetic, and toiletry', y = 'log(Turnover)')+
+  theme_classic()
+```
+
+Fit a seasonal naïve model using SNAIVE() applied to your training data (myseries_train).
+
+_Note: due to an increase in the seasonal variance over time, I log-transformed the Turnover series._
+
+```{r}
+
+# fit the model
+
+fit <- myseries_train %>%
+  model(SNAIVE(Turnover))
+```
+
+Check the residuals. Do the residuals appear to be uncorrelated and normally distributed?
+
+_There are indications of pattern in the residuals (log transformed data), particularly between 1995-2005, when the data showed a rapid increase in seasonal variation and trend. There is also autocorrelation in the lag series. It appears that the model did not capture these latter effects completely._ 
+
+_The residuals are approximately normally distributed. This was not the case prior to transforming the data._ 
+
+```{r}
+
+# plot model diagnostics
+
+fit %>% gg_tsresiduals()+
+  labs(title='Figure 16. South Australia Insdustry Diagnostics', subtitle='Residuals: pharmaceutical, cosmetic, and toiletry')
+
+```
+
+Produce forecasts for the test data
+
+```{r}
+
+fc <- fit %>%
+  forecast(new_data = anti_join(myseries, myseries_train))
+
+fc %>% autoplot(myseries)+
+  labs(title='Figure 17. South Australia Industry forecast', subtitle='pharmaceutical, cosmetic, and toiletry', y = 'log(Turnover)')+
+  theme_classic()
+```
+
+f. Compare the accuracy of your forecasts against the actual values.
+
+_Forecast accuracy (MAPE) for training and test sets was 3.50 and 3.63, respectively, indicating a slight reduction in model accuracy with the test set. The general consistency of these values indicates suggests that the model was not under- or over-fit with regard to the training data._
+
+```{r}
+
+# calculate accuracy of train and test
+
+fit1<-fit %>% accuracy()
+
+fc1<-fc %>% accuracy(myseries)
+
+# combine into single table
+
+flextable(rbind(fit1, fc1))
+```
+
+g. How sensitive are the accuracy measures to the amount of training data used?
+
+_The comparative sensitivity of accuracy measures to the amount of training data will depend, in part, on the forecasting method. For example, the SNAIVE model constructs a forecast equal to the last observed value from the same season. The amount of training data preceding that season is not taken into account. This is demonstrated below (See Figures 16 & 17). If we restrict our Turnover data to the last two years of record, the MAPE scores decrease to 1.04 (training) and 0.79 (test), indicating an increase in forecast accuracy. Other methods will generate accuracy measures that are more sensitive to the long-term record (e.g., MEAN, Drift)._ 
+
+_The sensitivity of accuracy measures will also depend on aspects of seasonality and trend in the data. For example, model accuracy will be less sensitive to the amount of training data for a series that is stationary, relative to one that is not._  
+
+
+```{r}
+
+# restrict analysis to last 2 years of record
+
+my_short <- myseries %>%
+  filter_index('2016 Jan' ~ .)
+
+#create trainset from 2016-17
+
+short_train <- my_short %>%
+  filter_index('2016 Jan' ~ '2017 Dec')
+
+#plot series and train set
+
+autoplot(my_short, Turnover) +
+  autolayer(short_train, Turnover, colour = "red")+
+  labs(title='Figure 16. South Australia Industry Turnover', subtitle='pharmaceutical, cosmetic, and toiletry: 2016-2018', y = 'log(Turnover)')+
+  theme_classic()
+
+#fit model 
+
+short_fit <- short_train %>%
+  model(SNAIVE(Turnover))
+
+short_fc <- short_fit %>%
+  forecast(new_data = anti_join(my_short, short_train))
+
+# plot forecast with emphasis on last 5 yrs of series
+  
+short_fc %>% autoplot(my_short)+
+  labs(title='Figure 17. South Australia Industry forecast', subtitle='pharmaceutical, cosmetic, and toiletry: 2016-2018', y = 'log(Turnover)')+
+  theme_classic()
+
+# calculate accuracy of train and test
+
+short_fit1<-short_fit %>% accuracy()
+
+short_fc1<-short_fc %>% accuracy(my_short)
+
+# combine into single table
+
+flextable(rbind(short_fit1, short_fc1))
+
+```
+
+
+
