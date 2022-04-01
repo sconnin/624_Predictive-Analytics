@@ -1,0 +1,723 @@
+---
+title: "624: Exponential Smoothing"
+date: "02/28/22"
+author: "Sean Connin"
+output:
+  html_document: 
+    toc: TRUE
+    toc-title: ""
+    toc_depth: 3
+    toc_float: 
+      collapsed: TRUE
+      smooth_scroll: FALSE
+    number_sections: true
+    df_print: paged
+    code_folding: hide
+    theme: sandstone
+    highlight: tango
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning=FALSE, message = FALSE, error=FALSE)
+```
+
+```{r}
+library(fpp3)
+library(magrittr)
+library(tidyverse)
+library(patchwork)
+library(fable) #forecast
+library(flextable)
+
+
+```
+
+
+# Hyndman: Exercise 8.1
+
+Consider the the number of pigs slaughtered in Victoria, available in the aus_livestock dataset.
+
+```{r}
+
+
+#unique(aus_livestock$Animal)
+
+pig<-aus_livestock%>%
+  filter(State == 'Victoria', Animal == 'Pigs')
+
+(pig%>%
+  autoplot(color='steelblue')+
+  labs(title='Figure 1. Number of Pigs Slaughtered in Victoria, AUS')+
+  theme_classic())
+
+
+
+```
+
+
+Use the ETS() function to estimate the equivalent model for simple exponential smoothing. Find the optimal values of  
+α and $l_0$ (fitted value at time 1), and generate forecasts for the next four months.
+
+- _α = 0.322_
+- _$l_0$ = 100646.6_
+
+
+
+```{r}
+
+# build model
+
+pig_fit<-pig%>%
+  model(ETS(Count ~ error("A") + trend("N") + season("N")))
+
+report(pig_fit) # model stats
+
+# forecast predictions
+
+for_pig<-pig_fit%>%
+  forecast(h=4)
+
+# plot predictions
+
+for_pig %>%
+  autoplot(pig)+
+  labs(y = 'Mean Count', title='Figure 2. 4Yr Forecast: Pigs')+
+  theme_classic()
+```
+
+Compute a 95% prediction interval for the first forecast using  $\hat{y}$ ±1.96 s where s
+is the standard deviation of the residuals. Compare your interval with the interval produced by R.
+
+_$\hat{y} + 1.96σ_1$ = 113502.1_
+
+_$\hat{y} - 1.96σ_1$ = 76871.01_
+
+Base R prediction intervals
+
+_$\hat{y} + 1.96σ_1$ = 113518.33_
+
+_$\hat{y} - 1.96σ_1$ = 76854.79	_
+
+_The one-step prediction interval estimated by R is slightly wider than that calculated by hand._
+
+```{r}
+
+# collect first forecast
+
+yhat<-head(for_pig$.mean, 1)
+
+# calculate standard deviation
+
+res<-augment(pig_fit)
+
+stdev<-sd(res$.resid)
+
+# calculate prediction interval manually
+
+plus_int<-yhat+1.96*stdev # 113502.1
+minus_int<-yhat-1.96*stdev  # 76871.01
+
+
+
+```
+
+```{r}
+# calculate prediction interval automatically -- ref: https://fabletools.tidyverts.org/reference/forecast.html
+
+rpred<-for_pig%>%
+  hilo()%>%
+  as.data.frame()%>%
+  select('95%')%>%
+  head(1)%>%
+  unlist()
+```
+
+
+# Hyndman: Exercise 8.5
+
+Data set global_economy contains the annual Exports from many countries. Select one country to analyse.
+
+Plot the Exports series and discuss the main features of the data.
+
+_The Exports series for Mexico displays an upward trend beginning during the 1970s. There does not appear to be an indication of a seasonal signal. However, the series may include an irregular multi-year cyclic signal._
+
+
+```{r}
+
+# select Mexico for analysis
+
+Mex<-global_economy%>%
+  filter(Country %in% 'Mexico')%>%
+  select(Exports)
+
+Mex%>%
+  autoplot(Exports, color = 'steelblue')+
+  labs(title='Figure 3. Exports from Mexico')+
+  theme_classic()
+
+
+
+```
+
+Use an ETS(A,N,N) model to forecast the series, and plot the forecasts.
+
+```{r}
+
+# build model
+
+Mex_mod <- Mex %>%
+  model(ETS(Exports ~ error("A") + trend("N") + season("N")))
+
+
+# forecast 10 years
+
+Mex_fc <- Mex_mod %>%
+  forecast(h = 10)
+
+#plot with forecast
+
+Mex_fc %>%
+  autoplot(Mex, color='steelblue') +
+  labs(title="Figure 4. Mexico, ETS(A,N,N)") +
+  theme_classic()
+
+```
+
+
+Compute the RMSE values for the training data.
+
+_The RMSE for our training set is 2.154. The RMSE is the square root of the mean of the squared differences between actual and predicted data. Or, in other terms, the variance of the residuals_
+
+```{r}
+
+
+# compute forecast accuracy measures
+
+
+RMSE1<-Mex_mod %>% accuracy()
+
+
+```
+
+
+Compare the results to those from an ETS(A,A,N) model. (Remember that the trended model is using one more parameter than the simpler model.) Discuss the merits of the two forecasting methods for this data set.
+
+```{r}
+
+# build model
+
+Mex_AAN_mod <- Mex %>%
+  model(ETS(Exports ~ error("A") + trend("A") + season("N")))
+
+
+# forecast 10 years
+
+Mex_AAN_fc <- Mex_mod %>%
+  forecast(h = 10)
+
+#plot with forecast
+
+Mex_AAN_fc %>%
+  autoplot(Mex, color='steelblue') +
+  labs(title="Figure 4. Mexico, ETS(A,N,N)") +
+  theme_classic()
+
+```
+
+
+```{r}
+
+# compute forecast accuracy measures
+
+
+RMSE2<-Mex_AAN_mod %>% accuracy()  # RMSE = 2.093)
+
+```
+
+Compare the forecasts from both methods. Which do you think is best?
+
+_We can use the RMSE measures to compare the accuracy of each model relative to the training set. The ANN model has a higher RMSE (2.154) than the AAN model (2.093), which suggests that the latter provides a better fit to the data._
+
+```{r}
+
+# compare RMSE between models
+
+cbind(RMSE1$RMSE, RMSE2$RMSE)%>%
+  as.data.frame()%>%
+  rename(RMSE_ANN = 'V1', RMSE_AAN = 'V2')%>%flextable()
+
+
+
+```
+
+
+
+Calculate a 95% prediction interval for the first forecast for each model, using the RMSE values and assuming normal errors. Compare your intervals with those produced using R.
+
+_Assuming that the RMSE substitutes for the standard deviation of model residuals, the calculated 95% prediction intervals for each forecast model are nearly identical. That said, the span of the ANN model is slightly greater than the AAN model (diff ~.02)._
+
+```{r}
+
+# collect first forecast Mex_fc
+
+m1_yhat<-head(Mex_fc$.mean, 1)
+
+# calculate prediction interval manually, sub RMSE for stdev
+
+p1_int<-m1_yhat+1.96*2.154
+p2_int<-m1_yhat-1.96*2.154
+
+span1<-p1_int-p2_int
+
+
+
+# collect first forecast Mex_AAN_fc
+
+
+m2_yhat<-head(Mex_AAN_fc$.mean, 1)
+
+# calculate standard deviation
+
+#m2_res<-augment(Mex_AAN_mod)
+
+#m2_stdev<-sd(m2_res$.resid)
+
+# calculate prediction interval manually, sub in RMSE for stdev
+
+p3_int<-m2_yhat+1.96*2.093
+p4_int<-m2_yhat-1.96*2.093
+
+span2<- p3_int-p4_int
+
+# compare prediction intervals
+
+pred1<- cbind(p2_int, p1_int, span1)
+pred2<- cbind(p4_int, p3_int, span2)
+
+
+df<-rbind(pred1, pred2)%>%
+  as.data.frame()%>%
+  rename('Lower 95%' = p1_int, 'Upper 95%' = p2_int, 'Span' = span1)
+
+row.names(df) <- c('ANN', 'AAN')
+  
+df
+
+```
+
+_The forecast prediction intervals predicted by R (hilo()) are identical compared between ANN and AAN models. However, the span (8.59) is slightly greater than the calculated prediction intervals._
+
+
+```{r}
+fc1<-Mex_fc%>%
+  hilo()%>%
+  as.data.frame()%>%
+  select('95%')%>%
+  head(1)%>%
+  unlist()
+
+fc2<-Mex_AAN_fc%>%
+  hilo()%>%
+  as.data.frame()%>%
+  select('95%')%>%
+  head(1)%>%
+  unlist()
+
+paste('The span for hilo prediction intervals is', 42.16368-33.56900)
+```
+
+# Hyndman: Exercise 8.6
+
+Forecast the Chinese GDP from the global_economy data set using an ETS model. 
+
+```{r}
+
+# subset data
+
+gdp<-global_economy%>%
+  select(Country, GDP)%>%
+  filter(Country %in% 'China')
+
+#Evaluate raw data
+
+gdp%>%autoplot(color='steelblue')+
+  labs(title='Figure 5. China GDP')+
+  theme_classic()
+
+gdp_mod <- gdp %>%
+  model(ETS(GDP ~ error("A") + trend("A") + season("N")))
+
+# forecast 5 years
+
+gdp_fc <- gdp_mod %>%
+  forecast(h = 5)
+
+#plot with forecast
+
+gdp_fc %>%
+  autoplot(gdp, color='steelblue') +
+  labs(title="Figure 6. China GDP - 5YR Forecast, ETS(A,A,N)") +
+  theme_classic()
+
+
+```
+
+
+Experiment with the various options in the ETS() function to see how much the forecasts change with damped trend, or with a Box-Cox transformation. 
+Try to develop an intuition of what each is doing to the forecasts.
+
+_The following graph provides a 10 year forecast using the Holts Damped Trend method at two levels of  
+$\phi$ (0.8, 0.9). Given that season variation and/or cyclic signals are absent, a Box-Cox transformation is not warranted._
+
+
+```{r}
+
+
+# forecast with damped trend
+
+gdp%>%
+  model('Holts'=ETS(GDP ~ error("A") + trend("A") + season("N")),
+        'Damped Holts (Phi= 0.9)'= ETS(GDP ~ error("A") + trend("Ad", phi = 0.9) + season("N")),
+        'Damped Holts (Phi= 0.8)'= ETS(GDP ~ error("A") + trend("Ad", phi = 0.8) + season("N")))%>%
+  forecast(h=10)%>%
+  autoplot(gdp, color='steelblue', level=NULL) +   # level NULL removes confidence intervals
+  labs(title="Figure 8. China GDP - 10YR Forecast with Damped (phi=0.8) Model") +
+  #guides(color = guide_legend(title = "Forecast"))+
+  theme_classic()
+  
+  
+
+```
+
+# Hyndman: Exercies 8.7
+
+Find an ETS model for the Gas data from aus_production and forecast the next few years. 
+
+```{r}
+
+#subset data
+
+gas<-aus_production%>%
+  select(Gas)
+
+#Evaluate raw data
+
+gas%>%autoplot(color='steelblue')+
+  labs(title='Figure 9. Australian Gas Production')+
+  theme_classic()
+
+#plot forecast with seasonality
+
+gas%>%
+  model(
+        'Holts'=ETS(Gas ~ error("M") + trend("A") + season("M")),
+        'Damped Holts (Phi= 0.8)'= ETS(Gas ~ error("M") + trend("Ad", phi = 0.8) + season("M")))%>%
+  forecast(h=20)%>%
+  autoplot(gas, color='steelblue', level=NULL) +   # level NULL removes confidence intervals
+  labs(title="Figure 9. Australian Gas Production', subtitle = '5YR Multiplicative Forecast with Damped Model (phi=0.8), ETS(M,A,M)") +
+  #guides(color = guide_legend(title = "Forecast"))+
+  theme_classic()
+
+
+
+```
+
+Why is multiplicative seasonality necessary here? Experiment with making the trend damped. 
+
+_A multiplicative seasonal model is necessary due to the fact that there is an obvious seasonal signal that is also increasing over time(annual)._
+
+
+Does it improve the forecasts?
+
+_The multiplicative model generates a forecast that captures the increase in seasonality over time. It also has a lower RMSE (4.59) that the additive model (4.76)._
+
+```{r}
+
+gas_mod<-gas%>%
+  model(
+        Gas_AAA=ETS(Gas ~ error("A") + trend("A") + season("A")),
+        Gas_MAM = ETS(Gas ~ error("M") + trend("A") + season("M")))
+
+gas_fc<-gas_mod%>%
+  forecast(h=20)
+
+gas_fc%>%
+  autoplot(gas, level=NULL) +   # level NULL removes confidence intervals
+  labs(title='Figure 10. Australian Gas Production', 
+       subtitle = '5YR Multiplicative Forecast: Comparing AAA vs. MAM') +
+  guides(color = guide_legend(title = "Forecast"))+
+  theme_classic()
+
+# assess rmse
+
+gas_mod %>% accuracy()%>%
+  select(.model, RMSE)%>%
+  rename(Model = '.model')%>%flextable()
+
+```
+
+# Hyndman: Exercies 8.8
+
+Recall your retail time series data (from Exercise 8 in Section 2.10).
+
+Why is multiplicative seasonality necessary for this series?
+
+_The data refers to inter-annual turnover in the Australian "pharmaceutical, cosmetic and toiletry goods retailing". There is both a strong trend and distinct seasonality that increases over time. As a result a multiplicative model is appropriate._ 
+
+Apply Holt-Winters’ multiplicative method to the data. Experiment with making the trend damped.
+
+```{r}
+
+set.seed(124566791)
+
+# load data
+
+series <- tsibbledata::aus_retail %>%
+  filter(`Series ID` == sample(aus_retail$`Series ID`,1)) #1 specifies number of Series ID groups
+
+# plot raw data
+
+series%>%
+  autoplot(Turnover)+
+  labs(title = 'Figure 11. Inter-Annual Turnover in Pharmaceutical, Cosmetic and Toiletry Retail Industry', 
+       subtitle = '1982-2020')+
+  theme(axis.text.x = element_text(angle = 90))+
+  theme_classic()
+
+# build model
+
+retail_mod<-series%>%
+  model(
+        Turnover_MAM = ETS(Turnover ~ error("M") + trend("A") + season("M")),
+        Turnover_MAM_Damped_phi_0.8 = ETS(Turnover ~ error("M") + trend("Ad", phi=.8) + season("M")))
+
+# forecast
+
+retail_fc<-retail_mod%>%
+  forecast(h=80)
+
+#plot
+
+
+retail_fc%>%
+  autoplot(series, level=NULL) +   # level NULL removes confidence intervals
+  labs(title='Figure 12. Turnover in Australian Pharmaceutical, Cosmetic and Toiletry Goods Retailing', 
+       subtitle = '10 YR Multiplicative Forecast: Comparing AAA vs. MAM') +
+  guides(color = guide_legend(title = "Forecast"))+
+  theme_classic()
+```
+
+Compare the RMSE of the one-step forecasts from the two methods. Which do you prefer?
+
+_The model results are quite similar comparing just the RMSE. However, the multiplicative model without damping captures the trend and seasonality to a much greater degree._
+
+```{r}
+
+retail_mod %>% accuracy()%>%
+  select(.model, RMSE)%>%
+  rename(Model = '.model')%>%flextable()
+
+
+
+```
+
+Check that the residuals from the best method look like white noise.
+
+_The innovation residuals appear to be randomly distributed about a mean of 0 and there does not appear to be autocorrelation in the lag features (ACF) which I would expect for 'white noise'. Similarly, Although several outliers are indicated in the ACF plot. The histogram of residuals is nearly normal._
+
+```{r}
+retail_mod %>%
+  select(Turnover_MAM) %>%
+  gg_tsresiduals()
+```
+Now find the _test set RMSE_, while training the model to the end of 2010. 
+
+```{r}
+
+# create train and test sets
+
+train <- series %>%
+  filter(year(Month) < 2011)
+
+test<- series %>%
+  filter(year(Month) > 2010)
+
+
+# build model on train
+
+train.mod<-train%>%
+  model(train_MAM = ETS(Turnover ~ error("M") + trend("A") + season("M")))
+
+# create forecast
+
+train.fc<-train.mod%>%
+  forecast(h=96) 
+
+#plot
+
+train.fc%>%
+  autoplot(series, color='steelblue')+
+  labs(title='Figure 13. Training Set: Seasonal Decomposed ETS Forecast', subtitle='Compare to observed data')+
+  theme_classic()
+
+# create function to calculate test RMSE
+
+nrow <- nrow(test)
+pred <- train.fc[6]
+obs<- test$Turnover
+
+rmse <- function(obs, pred, nrow){
+  rmse <- sqrt(1/nrow*sum((pred-obs)^2))
+  return (rmse)
+}
+
+test_rmse<-rmse(obs, pred, nrow)
+
+str_glue('The RMSE of the Test set is', {test_rmse})
+
+```
+
+Can you beat the seasonal naïve approach from Exercise 7 in Section 5.11?
+
+_Yes, the RMSE for the seasonal naive approach is 22.68. This is almost double that of the Holts Winter's Multiplicative Model._
+
+```{r}
+
+
+#fit model
+
+snaive <- train %>%
+  model(SNAIVE(Turnover))
+
+#forecast
+
+snaive_fc <- snaive %>%
+  forecast(new_data = anti_join(series, train))
+
+#plot
+
+snaive_fc%>%
+  autoplot(series, color='steelblue')+
+  labs(title='Figure 14. Turnover in Australian Pharmaceutical, Cosmetic and Toiletry Goods Retailing', 
+       subtitle = '10 YR Multiplicative Forecast: Seasonal Naive Model')+
+  theme_classic()
+
+# assess Naive RMSE
+
+snaive_fc %>% accuracy(series)%>%
+  select(.model, RMSE)%>%
+  rename(Model = '.model')%>%flextable()%>%
+  set_caption('Turnover in Australian Pharmaceutical, Cosmetic and Toiletry Goods Retailing: RMSE for Seasonal Naive Model')
+  
+
+
+```
+
+# Hyndman: Exercise 8.9 
+
+For the same retail data, try an STL decomposition applied to the Box-Cox transformed series, followed by ETS on the seasonally adjusted data. How does that compare with your best previous forecasts on the test set?
+
+
+```{r}
+
+#generate box-cox lambda
+
+lambda <- train %>%
+  features(Turnover, features = guerrero) %>%
+  pull(lambda_guerrero)
+
+# apply lambda to turnover
+
+box_train<-train%>%
+  mutate(trans_turnover = box_cox(Turnover, lambda))
+
+# plot transformed turnover
+
+box_train %>%
+  autoplot(trans_turnover, color = 'steelblue') +
+  labs(title = 'Figure 15. Box-Cox Transformed Turnover', subtitle='Based on Exercise 8.8 Data')+
+  theme_classic()
+```
+
+Seasonally adjust the data.
+
+_After some experimentation, I selected a trend window = 21, which is the default for STL. I also selected a seasonal window = 'periodic', which forces the seasonal component to be identical across years. In this instance, it produced good results._ 
+
+```{r}
+
+decomp_train<-box_train %>%
+  model(
+    STL(trans_turnover ~ trend(window = 21) +  # 21 is STL default for monthly data
+                   season(window='periodic'),  
+    robust = TRUE)) %>%
+  components() 
+
+decomp_train%>%
+  autoplot()+
+  labs(title='Figure 16. Seasonal Decomposition on Box-Cox Transformed Turnover Data')
+
+```
+Apply ETS to seasonally adjusted data
+
+_I have applied the decomposition_model() from fabletools to combine decomposition and model fitting. The models are fitted after decomposition. The ETS model includes seasonal damping (phi=.98)._
+
+_see: https://rdrr.io/cran/fabletools/man/decomposition_model.html _
+
+_The RMSE for STL/ETS training model is 2.33 and RMSE the STL/ETS test model is 12.15. Compare this to a test (without transformation or decomposition) RMSE of 11.545. The latter model performed better. However, both outperformed the SNAIVE model._
+
+```{r}
+
+# build model on train
+
+train.stl.ets<-train%>%
+  model(decomposition_model(
+    STL(box_cox(Turnover, lambda)),
+    ETS(season_adjust ~ error("M") + trend("Ad", phi=.98))))
+
+
+#ETS(Turnover ~ error("M") + trend("Ad", phi=.8)
+
+# create forecast
+
+train.stl.ets.fc<-train.stl.ets%>%
+  forecast(h=96) 
+
+#plot
+
+train.stl.ets.fc%>%
+  autoplot(series, color='steelblue')+
+  labs(title='Figure 17. Training Set: Seasonally Adjusted $ Decomposed ETS Forecast', subtitle='Compare to observed data')+
+  theme_classic()
+
+
+# calculate train and test RMSE using STL/ETS model
+
+train.rmse<-train.stl.ets%>% accuracy()
+
+nrow <- nrow(test)
+pred <- train.stl.ets.fc[6]
+obs<- test$Turnover
+
+ets.stl.rmse <- function(obs, pred, nrow){
+  rmse <- sqrt(1/nrow*sum((pred-obs)^2))
+  return (rmse)
+}
+
+test.rmse<-ets.stl.rmse(obs, pred, nrow)
+
+
+str_glue('The RMSE for STL/ETS training model is {train.rmse$RMSE}')
+
+str_glue('The RMSE of the STL/ETS test set is ', {test.rmse})
+
+```
+
+
+
+
+
+
+
+
+
+
