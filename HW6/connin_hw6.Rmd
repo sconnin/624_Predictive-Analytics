@@ -1,0 +1,863 @@
+---
+title: "624: ARIMA"
+date: "03/11/22"
+author: "Sean Connin"
+output:
+  html_document: 
+    toc: TRUE
+    toc-title: ""
+    toc_depth: 3
+    toc_float: 
+      collapsed: TRUE
+      smooth_scroll: FALSE
+    number_sections: true
+    df_print: paged
+    code_folding: hide
+    theme: sandstone
+    highlight: tango
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning=FALSE, message = FALSE, error=FALSE)
+```
+
+```{r}
+library(fpp3)
+library(magrittr)
+library(tidyverse)
+library(patchwork)
+library(fable) 
+library(flextable)
+
+
+```
+
+
+# Hyndman: Exercise 9.1
+
+Figure 9.32 shows the ACFs for 36 random numbers, 360 random numbers and 1,000 random numbers.
+
+![Figure 9.32](nine1.png)
+
+**Explain the differences among these figures. Do they all indicate that the data are white noise?**
+
+_Each of the ACF plots is demonstrative of a 'white noise' signal - i.e., the mean of the residuals is ~ zero and there are no indications of autocorrelation within the datasets._
+
+**Why are the critical values at different distances from the mean of zero? Why are the autocorrelations different in each figure when they each refer to white noise?**
+
+_The Y-axis on an ACF plot spans from -1 to 1 and reflects a range of possible correlation coefficients associated with the lag values. The dashed horizontal lines (critical values) indicate the statistical threshold for significance. These values decrease as the number of observations increase and the correlation estimates stabilize (i.e., residual errors decrease)._
+
+
+# Hyndman: Exercise 9.2 
+
+**A classic example of a non-stationary series are stock prices. Plot the daily closing prices for Amazon stock (contained in gafa_stock), along with the ACF and PACF. Explain how each plot shows that the series is non-stationary and should be differenced.**
+
+_Figure 1. AMZN's closing stock time series increases over time with possible seasonal adjustments (intra-annual). These features are obvious signatures of nonstationarity._ 
+
+_Figure 2. The ACF plot highlights significant autocorrelation at all lags, indicating non-stationarity._ 
+
+_Figure 3. The PACF plot shows significant partial autocorrelation at lags 4, 19, and 25, indicating non_stationarity._
+
+
+```{r}
+
+#subset data
+
+amzn<-gafa_stock%>%
+  filter(Symbol %in% 'AMZN')%>%
+  select(Symbol, Date, Close)
+
+# plot time series
+
+amzn%>%
+  autoplot(color = 'steelblue')+
+  labs(title= 'Figure 1. Amazon Daily Closing Stock Price', x = 'Year', y='Closing Price $')+
+  theme_classic()
+  
+#amzn %>%
+  #features(Close, feat_acf)
+  
+# plot acf
+
+  ACF(amzn, type='correlation') %>%
+  autoplot(color = 'steelblue') +
+  labs(title = "Figure 2. AMZN Lag Correlation")+
+  theme_classic()
+  
+  # plot pacf
+  
+ACF(amzn, type='partial') %>%
+  autoplot(color = 'steelblue') +
+  labs(title = "Figure 3. AMZN Partial Autocorrelation")+
+  theme_classic()
+
+```
+
+# Hyndman: Exercise 9.3
+
+**For the following series, find an appropriate Box-Cox transformation and order of differencing in order to obtain stationary data.**
+
+**Turkish GDP from global_economy.**
+
+_The box_cox lambda value for Turkish GDP was  0.15 which points to a log transformation._
+
+_Results of unitroot tests indicate that first order differencing with lambda transformation (kpss_stat = 0.08888563, kpss_pvalue=0.1) results in a stationary dataset._
+
+
+```{r}
+
+# subset the data
+
+turkey<-global_economy%>%
+  filter(Country %in% 'Turkey')%>%
+  select(GDP)
+
+#ACF(turkey)%>%autoplot() -- there are significant lags up to lag 10, gradual decline
+
+# Estimate lambda
+
+lambda<-turkey%>%
+  features(GDP, features=guerrero)%>%
+  pull(lambda_guerrero)
+
+# Plot transformed data
+
+turkey%>%
+  autoplot(box_cox(GDP, lambda), color='steelblue')+
+  labs(title = 'Figure 4. Box_Cox Transformed GDP', x= 'Year', y='Lambda(GDP)')+
+  theme_classic()
+
+# Apply unit root test
+
+turkey %>% 
+  mutate(GDP_1Diff = difference(box_cox(GDP, lambda)))%>%
+  features(GDP_1Diff, unitroot_kpss)%>%
+  flextable()%>%
+  set_caption('Table 1. Unit Root Test: Turkey GDP - Single Differencing')
+
+#plot 1st order differencing
+
+turkey%>% 
+  mutate(GDP_1Diff = difference(box_cox(GDP, lambda)))%>%
+  autoplot(GDP_1Diff, color='steelblue')+
+  labs(title = 'Figure 5. Turkish GDP with Box-Cox Transformation and Single Differencing')+
+  theme_classic()
+ 
+
+
+```
+
+**Accommodation takings in the state of Tasmania from aus_accommodation.**
+
+_The box_cox lambda value for Tasmanian Takings was -0.488 which points to an inverse square root transformation._
+
+_Results of unitroot tests indicate that first order seasonal differencing with lambda transformation (Kpss_stat = 0.2557541, kpss_pvalue=0.1) results in a stationary dataset._
+
+
+```{r}
+
+# subset the data
+
+
+accom<-aus_accommodation%>%
+  filter(State %in% 'Tasmania')%>%
+  select(Takings)
+
+#plot data
+
+accom%>%
+ autoplot(Takings, color='steelblue')+
+  labs(title = 'Figure 6. Tasmania Takings')+
+  theme_classic()
+
+
+# Estimate lambda
+
+lambda_accom<-accom%>%
+  features(Takings, features=guerrero)%>%
+  pull(lambda_guerrero)
+
+# Plot transformed data
+
+accom%>%
+  autoplot(box_cox(Takings, lambda_accom), color='steelblue')+
+  labs(title = 'Figure 7. Box_Cox Transformed Takings', x= 'Year-Quarter', y='Lambda(Takings)')+
+  theme_classic()
+
+# Apply unit root test
+
+#accom %>% features((box_cox(Takings, lambda_accom)), unitroot_nsdiffs) # 1 diff indicated
+
+accom %>% 
+  mutate(Takings_1Diff = difference(box_cox(Takings, lambda_accom)), 4)%>%   # apply seasonal differencing
+  features(Takings_1Diff, unitroot_kpss)%>%  # evaluated ndiffs - none required
+  flextable()%>%
+  set_caption('Table 2. Unit Root Test: Tasmania Takings - Single Seasonal Differencing')
+
+#plot 1st order differencing
+
+accom%>% 
+  mutate(Takings_1Diff = difference(box_cox(Takings, lambda_accom)))%>%
+  autoplot(Takings_1Diff, color='steelblue')+
+  labs(title = 'Figure 8. Tasmania Takings with Box-Cox Transformation and Single Seasonal Differencing')+
+  theme_classic()
+
+
+```
+
+**Monthly sales from souvenirs.**
+
+_The box_cox lambda value for Tasmanian Takings was 0.0021 which points to log transformation._
+
+_Results of unitroot tests indicate that first order seasonal differencing with lambda transformation (Kpss_stat = 0.05957872, kpss_pvalue=0.1) results in a stationary dataset._
+
+
+```{r}
+
+#souvenirs # there is clear monthly seasonality in this dataset (not shown here)
+
+
+#plot untransformed data
+
+souvenirs%>%
+ autoplot(Sales, color='steelblue')+
+  labs(title = 'Figure 9. Souvenir Sales')+
+  theme_classic()
+
+# Estimate lambda
+
+lambda_sales<-souvenirs%>%
+  features(Sales, features=guerrero)%>%
+  pull(lambda_guerrero)
+
+# Plot transformed data
+
+souvenirs%>%
+  autoplot(box_cox(Sales, lambda_accom), color='steelblue')+
+  labs(title = 'Figure 10. Box_Cox Transformed Sales', x= 'Month', y='Lambda(Sales)')+
+  theme_classic()
+
+# Apply unit root test
+
+#souvenirs %>% features((box_cox(Sales, lambda_accom)), unitroot_nsdiffs) # 1 seasonal diff indicated
+
+souvenirs %>% 
+  mutate(Sales_1Diff = difference(box_cox(Sales, lambda_sales)), 12)%>%
+  features(Sales_1Diff, unitroot_nsdiffs)%>%
+  flextable()%>%
+  set_caption('Table 3. Unit Root Test: Souvenirs Sales - Single Seasonal Differencing')
+
+#plot 1st order differencing
+
+souvenirs%>% 
+  mutate(Sales_1Diff = difference(box_cox(Sales, lambda_sales)))%>%
+  autoplot(Sales_1Diff , color='steelblue')+
+  labs(title = 'Figure 11. Souvenir Sales with Box-Cox Transformation and Single Seasonal Differencing')+
+  theme_classic()
+```
+
+# Hyndman: Exercise 9.3
+
+**For your retail data (from Exercise 8 in Section 2.10), find the appropriate order of differencing (after transformation if necessary) to obtain stationary data.**
+
+_There are is a clear upward trend, seasonal signal, and nonconstant variance in the Industry turnover data (Figure 12)._
+
+_A log transformation on Turnover was applied to reduce heteroskedasticity (Figure 13)._
+
+_STL decomposition was applied to extract a seasonally adjusted series (Figure 14). There does appear to be some grouping patterns in the remainder._
+
+_A unit root ndiff test on the seasonally adjusted data indicated a need for single differencing (Table 6)._
+
+_A unit root kpss test on the differenced data indicated that no further differencing was required to achieve stationarity (Table 5 and Figure 15)._
+
+_An ACF plot of the differenced data (stationary) indicates continuing issues with lag autocorrelation (Figure 16). These were minimized using a 5 year seasonal window in the STL decomposition._
+
+```{r}
+set.seed(124566791)
+
+# load data
+
+series <- aus_retail %>%
+  filter(`Series ID` == sample(aus_retail$`Series ID`,1)) #1 specifies number of Series ID groups
+
+# plot row data
+
+series%>%
+  autoplot(Turnover , color='steelblue')+
+  labs(title = 'Figure 12. Turnover - 	Pharmaceutical, cosmetic and toiletry goods retailing', x='Year/MOnth')+
+  theme_classic()
+
+# Estimate lambda - #.118 log()
+
+lambda_turn<-series%>%
+  features(Turnover, features=guerrero)%>%
+  pull(lambda_guerrero)
+
+# Plot transformed data
+
+series%>%
+  autoplot(box_cox(Turnover, lambda_turn), color='steelblue')+
+  labs(title = 'Figure 13. Box_Cox Transformed Turnover', x= 'Year/Month', y='Lambda(Sales)')+
+  theme_classic()
+
+# Decompose to access seasonally adjusted data 
+
+library(seasonal)
+
+decomp<-series%>%
+  mutate(Trans_Turnover = box_cox(Turnover, lambda_turn))%>%
+  model(
+    STL(Trans_Turnover ~ trend(window = 13) + season(window=5),
+    robust = TRUE))%>%
+  components()
+
+decomp%>%
+  autoplot()+
+  labs(title='Figure 14. STL Decomposition Industry Turnover')
+
+
+# Apply unit root ndiff test
+
+#decomp %>% features(season_adjust, unitroot_nsdiffs) # 0 seasonal diff indicated
+
+decomp %>% 
+  features(season_adjust, unitroot_ndiffs)%>%
+  select(!.model)%>%
+  flextable()%>%
+  set_caption('Table 5. Unit Root Test: Industry Turnover - Single  Differencing')
+
+#plot 1st order differencing on seasonally adjusted data
+
+decomp%>% 
+  mutate(season_adjust_1Diff = difference(season_adjust), 12)%>%
+  autoplot(season_adjust_1Diff , color='steelblue')+
+  labs(title = 'Figure 15. Seasonally Adjusted Industry Turnover with Box-Cox Transformation and Single Differencing')+
+  theme_classic()
+
+decomp%>% 
+  mutate(season_adjust_1Diff = difference(season_adjust), 12)%>%
+  features(season_adjust_1Diff, unitroot_kpss)%>%
+  select(Industry, kpss_stat, kpss_pvalue)%>%
+  flextable()%>%
+  set_caption('Table 6. Unit Root Test for Seasonally Adjusted Industry Turnover Data, Log Transformed, Single Differencing')
+
+
+# check acf
+
+decomp_adj <-decomp%>% 
+  mutate(season_adjust_1Diff = difference(season_adjust), 12)
+
+decomp_adj%>%
+  ACF(season_adjust_1Diff)%>%
+  autoplot()+
+  labs(title = 'Figure 16. ACF for Seasonally Adjusted, Log-transformed, Differenced Industry Turnover Data')+
+  theme_classic()
+
+```
+
+# Hyndman: Exercise 9.6
+
+**Simulate and plot some data from simple ARIMA models.**
+
+**Use the following R code to generate data from an AR(1) model with ϕ1=0.6 and σ2=1. The process starts with  y1=0.**
+
+```{r}
+
+set.seed(4532)
+
+y <- numeric(100)
+
+e <- rnorm(100)
+
+for(i in 2:100)
+  y[i] <- 0.6*y[i-1] + e[i]
+
+sim <- tsibble(idx = seq_len(100), y = y, index = idx)
+
+#plot
+
+sim%>%
+  rename(day = idx)%>%
+  as_tsibble()%>%
+  autoplot(color = 'steelblue')+
+  labs(title = 'Figure 17. Simulated AR1: Phi = 0.6')+
+  theme_classic()
+
+```
+
+**Produce a time plot for the series. How does the plot change as you change  ϕ1?**
+
+_Changing phi to ϕ0 results in yt equivalent to white noise._
+
+```{r}
+
+set.seed(2348)
+
+for(j in 2:100)
+  y[j] <- 0*y[j-1] + e[j]
+
+sim2 <- tsibble(idx = seq_len(100), y = y, index = idx)
+
+sim2%>%
+  rename(day = idx)%>%
+  as_tsibble()%>%
+  autoplot(color = 'steelblue')+
+  labs(title = 'Figure 18. Simulated AR1: Phi = 0')+
+  theme_classic()
+
+
+
+
+```
+_Changing phi to ϕ1 results in yt equivalent to a random walk, assuming c = 0. Otherwise, yt is includes drift._
+
+```{r}
+set.seed(543)
+
+for(k in 2:100)
+  y[k] <- 1.0*y[k-1] + e[k]
+
+sim3 <- tsibble(idx = seq_len(100), y = y, index = idx)
+
+sim3%>%
+  rename(day = idx)%>%
+  as_tsibble()%>%
+  autoplot(color = 'steelblue')+
+  labs(title = 'Figure 19. Simulated AR1: Phi = 1.0')+
+  theme_classic()
+  
+```
+_Changing phi to ϕ-1 causes yt to oscillate around the mean._
+
+_Note: we restrict AR models to stationary data -1<ϕ1<1._ 
+
+```{r}
+set.seed(543)
+
+for(k in 2:100)
+  y[k] <- -1.0*y[k-1] + e[k]
+
+sim3 <- tsibble(idx = seq_len(100), y = y, index = idx)
+
+sim3%>%
+  rename(day = idx)%>%
+  as_tsibble()%>%
+  autoplot(color = 'steelblue')+
+  labs(title = 'Figure 20. Simulated AR1: Phi = -1.0')+
+  theme_classic()
+```
+
+**Write your own code to generate data from an MA(1) model with θ1=0.6 and  σ2=1.** 
+
+**Produce a time plot for the series. How does the plot change as you change θ1?**
+
+_The MA(1) model uses past forecast errors with a lag of one to forecast future levels. This is different from moving average smoothing._
+
+_Using the arima.sim() function to generate the series, changing θ1 results in different time series patterns - similar to the AR(1) model._
+
+```{r}
+
+
+set.seed(5437)
+
+# we will use arima.sim from the fable package
+
+sim5 <- arima.sim(list(order=c(0,0,1), ma= 0.6), n=100) 
+sim6 <- arima.sim(list(order=c(0,0,1), ma= -2), n=100) 
+sim7 <- arima.sim(list(order=c(0,0,1), ma= 2), n=100) 
+
+p1<-sim5%>%
+  as_tsibble()%>%
+  autoplot(color='steelblue')+
+  labs(title = 'Figure 22. Simulated MA1: Phi = -0.99, sd=1')+
+  theme_classic()
+
+p2<-sim6%>%
+  as_tsibble()%>%
+  autoplot(color='steelblue')+
+  labs(title = 'Figure 23. Simulated MA1: Phi = 0.6, sd=1')+
+  theme_classic()
+
+p3<-sim7%>%
+  as_tsibble()%>%
+  autoplot(color='steelblue')+
+  labs(title = 'Figure 24. Simulated MA1: Phi = 2, sd=1')+
+  theme_classic()
+
+p1/p2/p3
+
+```
+
+**Generate data from an ARMA(1,1) model with  ϕ1=0.6,  θ1=0.6 and σ2=1.**
+
+```{r}
+
+sim8 <- arima.sim(list(order=c(1,0,1), ar= 0.6, ma=0.6), n=100) 
+
+p4<-sim8%>%
+  as_tsibble()%>%
+  autoplot(color='steelblue')+
+  labs(title = 'Figure 25. Simulated ARMA(1,1): phi = 0.6, theta = 0.6, sd=1')+
+  theme_classic()
+
+
+```
+
+**Generate data from an AR(2) model with ϕ1=−0.8,  ϕ2=0.3 and  σ2=1. (Note that these parameters will give a non-stationary series).**
+
+**Graph the latter two series and compare them.**
+
+_The ARMA(1,1) model produces a white noise time series (Figure 25)._
+
+_The AR(2) model produces a non-stationary series with exponentially increasing variance (Figure 26)._
+
+```{r}
+
+set.seed(998877)
+
+# the following is adapted from https://stackoverflow.com/questions/33680774/generating-non-stationary-time-series-in-r
+
+# empty vector for process
+Yt <- vector("numeric",100)
+
+# innovations (process errors)
+error <- rnorm(100)
+
+# set first 2 times to innovations
+Yt[1:2] <- error[1:2]
+
+# simulate AR(2)
+for(t in 3:100) {Yt[t] <- -.8*Yt[t-1] + 0.3*Yt[t-2] + error[t]}
+
+# build tsibble for graphing
+
+sim.data<-tsibble(id=seq_len(100), y=Yt, index=id)
+
+#build plot
+
+
+p5<-sim.data%>%
+  autoplot(color='steelblue')+
+  labs(title = 'Figure 26. Simulated AR2(2): phi = (-.8, 0.3), sd=1')+
+  theme_classic()
+
+
+p4/p5
+```
+
+# Hyndman: Exercise 9.7
+
+**Consider aus_airpassengers, the total number of passengers (in millions) from Australian air carriers for the period 1970-2011.**
+
+**Use ARIMA() to find an appropriate ARIMA model. What model was selected. Check that the residuals look like white noise. Plot forecasts for the next 10 periods.**
+
+
+```{r}
+
+library(forecast)
+
+air<-aus_airpassengers
+
+air%>%
+  autoplot(color='steelblue')+
+  labs(title = 'Figure 27. Air Passenger Time Series')+
+  theme_classic()
+
+
+#perform check on model, we reference back to this
+
+auto<-auto.arima(air)  # results in ARIMA(0,2,1) coeff ma1 = -8.963, s.e. .0594
+
+```
+_The passenger time series shows an increasing trend with some curvature. There are no signs of seasonality. The series is not stationary. Differencing will be required to establish the latter._
+
+
+_It appears that a second order differencing will be required to achieve stationarity. Stationarity is indicated by the ACF and PACF plots on the second order differenced series (Figure 28)._ 
+```{r}
+
+air%>%
+  features(Passengers, unitroot_ndiffs)%>%
+  flextable()%>%
+  set_caption('Table 4. Air Passengers: Unitroot Test')
+
+# model single difference and plot diagnostics
+
+air.diff2<-air%>%
+  mutate(air_2diff = difference(difference((Passengers))))
+
+air.diff2 %>% 
+  select(!c(Passengers))%>%
+  gg_tsdisplay()+
+  labs(title='Figure 28. Diagnostics Plot of Twice Differenced Air Passengers Time Series')
+
+
+```
+
+_The negative value at lag-1 suggests an MA(1) model or ARIMA (0,2,1) (Figure 28). The PACF is suggestive of an AR(4) or ARIMA (4,2,0) model. Both will be fit and compared along with stepwise and full search ARIMAs._
+
+_The stepwise and full search models yielded the lowers AICc values and identical results. The best fit model is an ARIMA(0,2,1) with a MA coeff of -0.8963._
+
+```{r}
+
+
+# select model from set of options
+
+air.fit<-air%>%
+  model(arima021 = ARIMA(Passengers ~ pdq(0,2,1)),
+        arima420 =ARIMA(Passengers ~ pdq(4,2,0)),
+        stepwise=ARIMA(Passengers),
+        search=ARIMA(Passengers, stepwise=FALSE))
+
+
+# Review diagnostics
+
+report(air.fit)
+
+# plot model diagnostics
+
+air.fit%>%
+  select(search)%>%
+  gg_tsresiduals()+
+  labs(title='Figure 29. Diagnostics for Air Passengers Time Series: ARIMA(0, 2,1)')
+  
+
+# get Beta coefficient along with full model results
+
+coeff<-air.diff2%>%model(ARIMA(Passengers))%>%
+  tidy(report())  # full search
+
+coeff%>%flextable()%>%
+  set_caption('Table 5: ARIMA(0,2,1) Statistics')
+```
+_The 10 year forecast using ARIMA(0,2,1)._
+
+```{r}
+
+air.fit%>%
+  forecast(h = 10) %>%
+  filter(.model=='search')%>%
+  autoplot(air) +
+  labs(title = 'Figure 30. Australian air passengers 10-year forecast: ARIMA(0,2,1)')+
+  theme_classic()
+
+```
+
+**Write the model in terms of the backshift operator.**
+
+_General form for a twice differenced series_: $(1-B)^2y_{t}$ = c + $(1+\theta_{1}B+.....\theta_{q}B^{q})\epsilon_{t}$
+
+**Plot forecasts from an ARIMA(0,1,0) model with drift and compare these to part a.**
+
+_Adding a constant (drift) produces a forecast that is shifted downward (shallower slope) relative to part a._ 
+
+```{r}
+air010.drift<-air%>%
+  model(arima010 = ARIMA(Passengers ~ 1 + pdq(0,1,0))) # forecast package nomenclature
+
+#tidy(report(air010.drift))%>%flextable()%>%set_caption('Table 6. ARIMA(010) with Drift')
+
+air010.drift%>%
+  forecast(h = 10) %>%
+  autoplot(air) +
+  labs(title = 'Figure 31. Australian air passengers 10-year forecast: ARIMA(0,1,0) with Drift.')+
+  theme_classic()
+
+
+
+```
+
+
+**Plot forecasts from an ARIMA(2,1,2) model with drift and compare these to parts a and c. Remove the constant and see what happens.**
+
+_Absent the constant an ARIMA(2,1,2) produces a null result._
+
+```{r}
+
+air212.drift<-air%>%
+  model(arima212 = ARIMA(Passengers ~ 1+pdq(2,1,2)))
+
+
+air212.drift%>%
+  forecast(h = 10) %>%
+  autoplot(air) +
+  labs(title = 'Figure 32. Australian air passengers 10-year forecast: ARIMA(2,1,2) with Drift(Constant = 1)')+
+  theme_classic()
+
+air212.nodrift<-air%>%
+  model(arima010 = ARIMA(Passengers ~ 0 + pdq(2,1,2)))
+
+air212.nodrift%>%
+  forecast(h = 10) %>%
+  autoplot(air) +
+  labs(title = 'Figure 32. Australian air passengers 10-year forecast: ARIMA(0,1,0) Without Drift')+
+  theme_classic()
+
+```
+
+
+**Plot forecasts from an ARIMA(0,2,1) model with a constant. What happens?**
+
+_The Model specification induces a quadratic or higher order polynomial trend._
+
+```{r}
+
+air021.drift<-air%>%
+  model(arima021 = ARIMA(Passengers ~ 1+pdq(0,2,1)))
+
+
+air021.drift%>%
+  forecast(h = 10) %>%
+  autoplot(air) +
+  labs(title = 'Figure 33. Australian air passengers 10-year forecast: ARIMA(0,2,1) with Drift')+
+  theme_classic()
+
+
+```
+
+# Hyndman: Exercise 9.8
+
+
+**For the United States GDP series (from global_economy):**
+
+**if necessary, find a suitable Box-Cox transformation for the data**
+
+_The estimated Box_Cox lambda for GDP is 0.392 which suggests a square root transformation. While there is an obvious trend in the series, there is no evidence of seasonality. In this context, a transformation may not be necessary. I will apply the transformation given the outline of this exercise. And I will adjust GDP to a per capita basis._
+
+```{r}
+
+usgdp<-global_economy%>%
+  filter(Country %in% 'United States')%>%
+  mutate(gdp_capita = GDP/Population)%>%
+  select(Year, gdp_capita)
+
+usgdp%>%
+  autoplot(color='steelblue')+
+  labs(title = 'Figure 34. Per Capita US GDP')+
+  theme_classic()
+
+lambda_gdp<-usgdp%>%
+  features(gdp_capita, features=guerrero)%>%
+  pull(lambda_guerrero)
+
+
+
+
+
+
+
+
+```
+**Fit a suitable ARIMA model to the transformed data using ARIMA();**
+
+_With lambda transformed per/capita GDP data, an ARIMA(1,1,0) model is a suitable place to start._
+
+```{r}
+
+# identify potential model
+
+gdp.fit<-usgdp %>%
+  model(ARIMA(box_cox(gdp_capita, lambda_gdp)))
+
+report(gdp.fit)
+
+gdp110.drift<-usgdp%>%
+  model(gdp110 = ARIMA(box_cox(gdp_capita, lambda_gdp) ~ 1 + pdq(1,1,0))) # forecast package nomenclature
+
+
+```
+
+**Try some other plausible models by experimenting with the orders chosen;**
+
+```{r}
+
+# select model from set of options
+
+options<-usgdp%>%
+  model(gdp110 = ARIMA(box_cox(gdp_capita, lambda_gdp) ~ 1 + pdq(1,1,0)),
+        gdp011 = ARIMA(box_cox(gdp_capita, lambda_gdp) ~ 1 + pdq(0,1,1)),
+        gdp022 =ARIMA(gdp_capita ~ 1+pdq(0,2,2)),  # untransformed, twice differenced based on auto.arima()
+        stepwise=ARIMA(box_cox(gdp_capita, lambda_gdp)),
+        search=ARIMA(box_cox(gdp_capita, lambda_gdp), stepwise=FALSE))
+
+
+# Review diagnostics
+
+report(options)
+
+
+```
+
+
+**Choose what you think is the best model and check the residual diagnostics;**
+
+_ARIMA(1,1,0) results on the lambda transformed data are identical to those calculated by search and stepwise models. Diagnostics for the former indicate white noise and no remaining autocorrelation._
+
+```{r}
+# plot model diagnostics
+
+options%>%
+  select(gdp110)%>%
+  gg_tsresiduals()+
+  labs(title='Figure 35. Diagnostics for US Per Capita GDP Time Series: ARIMA(1,1,0)')
+
+```
+
+**Produce forecasts of your fitted model. Do the forecasts look reasonable?**
+
+_Yes, the forecast looks reasonable._
+
+```{r}
+gdp110.drift%>%
+  forecast(h = 10) %>%
+  autoplot(usgdp) +
+  labs(title = 'Figure 36. US GDP (Lambda) 10-year forecast: ARIMA(1,1,0) with Drift.')+
+  theme_classic()
+```
+
+
+**Compare the results with what you would obtain using ETS() (with no transformation).**
+
+_This model will not include a Box-Cox transformation but GDP will be reported on a per-capita basis. We will apply a non-seasonal ETS (AAN) model and forecast for 10 year period._
+
+_Visually the results of the ETS(AAN) and ARIMA(1,1,0) (with transformation) are identical. We can make this comparison quantitatively using cross-validation._
+
+_Results of cross-validation (Table 6: see RMSE and MAPE) indicate that the ARIMA model produces a better fit than the ETS model._
+
+```{r}
+
+#build ETS model
+
+gdp.ets<-usgdp%>%
+  model(ETS(gdp_capita ~error('A')+trend('A')+season('N')))
+
+#build forecast
+
+gdp.fc<-gdp.ets%>%
+  forecast(h=10)
+
+#plot forecast
+
+gdp.fc%>%
+  autoplot(usgdp, color='steelblue')+
+  labs(title='Figure 37. US Per Capita GDP - 10 Yr. Forecast, ETS(A,A,N)')+
+  theme_classic()
+
+# compare models using cross-validation
+
+usgdp %>%
+  slice(-n()) %>%
+  stretch_tsibble(.init = 10) %>%
+  model(
+    ETS(gdp_capita ~error('A')+trend('A')+season('N')),
+    ARIMA(box_cox(gdp_capita, lambda_gdp) ~ 1 + pdq(1,1,0))
+  ) %>%
+  forecast(h = 10) %>%
+  accuracy(usgdp) %>%
+  select(.model, RMSE:MAPE)%>%
+  flextable()%>%
+  set_caption('Table 6. Comparing Model Fit for US Per Capita GDP: ETS (AAN) vs. ARIMA(1,1,0)')
+
+
+```
+
+
