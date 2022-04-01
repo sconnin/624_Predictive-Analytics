@@ -1,2 +1,3 @@
 # 624_Predictive-Analytics
-Files and projects for predictive analytics course
+
+This repository contains curated files and projects for a graduate-level predictive analytics course.
